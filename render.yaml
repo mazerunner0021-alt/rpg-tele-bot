@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: rpg-tele-bot
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install && npm run build && npx prisma generate && npx prisma migrate deploy
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: PORT
+        value: 10000
+      # RENDER_EXTERNAL_URL is injected automatically by Render for every web
+      # service — it does not need to be (and should not be) set here.
