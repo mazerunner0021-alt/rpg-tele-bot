@@ -21,3 +21,13 @@ export function slugify(input: string): string {
     .replace(/^-+|-+$/g, "");
   return slug || "scene";
 }
+
+/**
+ * Telegram deep link straight to one forum topic's thread, so a button can
+ * take a user directly there instead of them scrolling the sidebar. Only
+ * valid for supergroups, whose chat ids are always -100xxxxxxxxxx.
+ */
+export function topicDeepLink(chatId: number, telegramTopicId: number): string {
+  const internalId = String(chatId).replace(/^-100/, "");
+  return `https://t.me/c/${internalId}/${telegramTopicId}`;
+}

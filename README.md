@@ -46,6 +46,9 @@ thumbnail, no OOC clutter — while they have an active role.
   templates, and `/export` transcript generation.
 - **On-demand cleanup** — `/cleanup` removes the bot's own prompts,
   confirmations, and errors from a topic, keeping the RP content readable.
+- **Scene index** — a pinned message in Casting (`/scenes`) listing every
+  scene with a button that deep-links straight to its topic, so you don't
+  have to hunt through the sidebar.
 - All state lives in Postgres via Prisma — nothing important is held only in
   memory, so a Render restart/redeploy never loses in-progress work.
 
@@ -239,6 +242,7 @@ needing a live database connection at generation time.
 |---|---|---|---|
 | `/setup` | anywhere in the group | admin | Enable/verify forum setup, create Casting + Introductions |
 | `/scene [name]` | anywhere | admin | Create a new scene topic; with no name, offers saved templates |
+| `/scenes` | anywhere | anyone | Show/refresh the pinned scene index in Casting (links straight to every scene's topic) |
 | `/closescene` | in a scene topic | admin | Close the scene (and its forum topic) |
 | `/addscenepic` | in an open scene topic | admin | Update the scene's banner photo |
 | `/savetemplate <name>` | in a scene topic | admin | Save this scene's title+description as a reusable template |
@@ -365,6 +369,18 @@ what was actually asked for. Deliberately never tracked as ephemeral: the
 pinned control cards, character proposal cards, banners, RP dialogue,
 approval/rejection notices, and `/roll`/`/character` results — anything
 that's a record of something, not just clutter from getting there.
+
+**The scene index links to topics, it doesn't group them — because Telegram
+can't.** Forum topics are a flat list with no folder/nesting API; there's no
+way for a bot (or anyone) to make several topics collapse into one entry in
+the sidebar. `/scenes` is the closest practical alternative: one pinned
+message in Casting listing every scene with a button that deep-links
+straight to it (`t.me/c/<chat>/<topic>`), refreshed whenever a scene is
+created, opened, or closed. It reduces sidebar-hunting; it doesn't reduce
+the sidebar itself. A `/deletescenetopic`-style command that actually
+removes old closed topics from the sidebar (auto-exporting the transcript
+first, with the data staying in Postgres regardless of what happens to the
+Telegram topic) was scoped out for now but would be a natural follow-up.
 
 ## Known limitations
 

@@ -37,12 +37,17 @@ enum SceneStatus {
 
 /// A Telegram group (supergroup) the bot has been set up in.
 model Group {
-  id             String   @id @default(cuid())
-  telegramChatId BigInt   @unique
-  title          String
-  isForumEnabled Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  telegramChatId      BigInt   @unique
+  title               String
+  isForumEnabled      Boolean  @default(false)
+  /// Message id (in the Casting topic) of the pinned scene index — a single
+  /// message listing every scene with buttons that deep-link straight to its
+  /// topic, so admins/players don't have to hunt through the sidebar. See
+  /// README "Design decisions".
+  sceneIndexMessageId Int?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   topics            Topic[]
   characters        Character[]

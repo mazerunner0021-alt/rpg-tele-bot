@@ -19,6 +19,7 @@ const HELP_TEXT = [
   "",
   "<b>Scenes</b> (admin)",
   "/scene [name] — create a scene, or pick a saved template if no name is given",
+  "/scenes — jump to the pinned scene index (links straight to every scene's topic)",
   "/closescene — close the scene in this topic",
   "/addscenepic — update this scene's banner photo",
   "/savetemplate &lt;name&gt; — save this scene's title+description for reuse",

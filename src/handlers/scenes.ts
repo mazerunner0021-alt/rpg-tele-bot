@@ -1,7 +1,7 @@
 import { InlineKeyboard, InputFile, type Composer } from "grammy";
 import type { Group, Scene } from "@prisma/client";
 import { prisma } from "../lib/prisma";
-import { escapeHtml, mentionHtml, slugify } from "../lib/format";
+import { escapeHtml, mentionHtml, slugify, topicDeepLink } from "../lib/format";
 import { safeCall, safePinMessage } from "../lib/telegram";
 import { getOrCreateGroup, getSceneForCurrentTopic, currentThreadId } from "../lib/scope";
 import { replyEphemeral, trackIncoming } from "../lib/ephemeral";
@@ -75,6 +75,59 @@ async function refreshSceneCard(ctx: MyContext, chatId: number, threadId: number
   );
 }
 
+const SCENE_STATUS_ORDER = { OPEN: 0, CASTING: 1, CLOSED: 2 } as const;
+const SCENE_STATUS_ICON = { OPEN: "🎬", CASTING: "🎭", CLOSED: "🔒" } as const;
+
+/**
+ * Posts (once) or edits (thereafter) a single pinned message in the Casting
+ * topic listing every scene, with buttons that deep-link straight to each
+ * one's topic — Telegram has no folder/nesting for forum topics, so this is
+ * the closest thing to "grouping" scenes together. See README "Design
+ * decisions". Silently does nothing if /setup hasn't created Casting yet.
+ */
+async function refreshSceneIndex(ctx: MyContext, groupId: string): Promise<void> {
+  const chat = ctx.chat;
+  if (!chat) return;
+
+  const [castingTopic, scenes, group] = await Promise.all([
+    prisma.topic.findFirst({ where: { groupId, type: "CASTING" } }),
+    prisma.scene.findMany({ where: { groupId }, include: { topic: true }, orderBy: [{ createdAt: "desc" }] }),
+    prisma.group.findUnique({ where: { id: groupId } }),
+  ]);
+  if (!castingTopic || !group) return;
+
+  scenes.sort((a, b) => SCENE_STATUS_ORDER[a.status] - SCENE_STATUS_ORDER[b.status]);
+
+  const text =
+    scenes.length === 0
+      ? "<b>📚 Scenes</b>\n\nNo scenes yet. Create one with /scene."
+      : `<b>📚 Scenes</b> (${scenes.length})\n\nTap a scene to jump straight to its topic.`;
+
+  const kb = new InlineKeyboard();
+  for (const s of scenes) {
+    kb.url(`${SCENE_STATUS_ICON[s.status]} ${s.title}`, topicDeepLink(chat.id, s.topic.telegramTopicId)).row();
+  }
+
+  if (!group.sceneIndexMessageId) {
+    const sent = await safeCall("send scene index", () =>
+      ctx.api.sendMessage(chat.id, text, {
+        message_thread_id: castingTopic.telegramTopicId,
+        parse_mode: "HTML",
+        reply_markup: kb,
+      })
+    );
+    if (sent) {
+      await prisma.group.update({ where: { id: groupId }, data: { sceneIndexMessageId: sent.message_id } });
+      await safePinMessage(ctx.api, chat.id, sent.message_id);
+    }
+    return;
+  }
+
+  await safeCall("edit scene index", () =>
+    ctx.api.editMessageText(chat.id, group.sceneIndexMessageId!, text, { parse_mode: "HTML", reply_markup: kb })
+  );
+}
+
 async function createScene(ctx: MyContext, group: Group, title: string, description: string | null): Promise<void> {
   const chat = ctx.chat;
   if (!chat || !ctx.from) return;
@@ -100,6 +153,7 @@ async function createScene(ctx: MyContext, group: Group, title: string, descript
   });
 
   await refreshSceneCard(ctx, chat.id, topic.telegramTopicId, scene);
+  await refreshSceneIndex(ctx, group.id);
   await replyEphemeral(ctx, `Scene <b>${escapeHtml(title)}</b> created! Head to its topic to finish setting it up.`, {
     parse_mode: "HTML",
   });
@@ -207,6 +261,7 @@ async function closeScene(ctx: MyContext, scene: Scene): Promise<void> {
   const threadId = currentThreadId(ctx);
   const updated = await prisma.scene.update({ where: { id: scene.id }, data: { status: "CLOSED" } });
   await refreshSceneCard(ctx, chat.id, threadId, updated);
+  await refreshSceneIndex(ctx, scene.groupId);
   await safeCall("announce scene closed", () =>
     ctx.api.sendMessage(chat.id, `🛑 <b>${escapeHtml(scene.title)}</b> is now closed.`, {
       message_thread_id: threadId,
@@ -359,6 +414,18 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
       return;
     }
     await promptNewScene(ctx, group);
+  });
+
+  composer.command("scenes", async (ctx) => {
+    if (!ctx.chat) return;
+    const group = await getOrCreateGroup(ctx.chat);
+    await refreshSceneIndex(ctx, group.id);
+    const castingTopic = await prisma.topic.findFirst({ where: { groupId: group.id, type: "CASTING" } });
+    if (castingTopic && currentThreadId(ctx) !== castingTopic.telegramTopicId) {
+      await replyEphemeral(ctx, "📚 Scene index updated — see the pinned message in 📋 Casting.", {
+        message_thread_id: currentThreadId(ctx),
+      });
+    }
   });
 
   composer.command("closescene", async (ctx) => {
@@ -599,6 +666,7 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
     const updated = await prisma.scene.update({ where: { id: scene.id }, data: { status: "OPEN" } });
     await ctx.answerCallbackQuery({ text: "Scene is live!" });
     await refreshSceneCard(ctx, ctx.chat!.id, currentThreadId(ctx), updated);
+    await refreshSceneIndex(ctx, scene.groupId);
     await announceSceneLive(ctx, updated);
   });
 
