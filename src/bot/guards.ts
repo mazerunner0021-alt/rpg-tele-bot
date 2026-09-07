@@ -1,5 +1,6 @@
 import { isGroupAdmin } from "../lib/adminCheck";
 import { currentThreadId } from "../lib/scope";
+import { replyEphemeral } from "../lib/ephemeral";
 import type { MyContext } from "./context";
 
 /** Returns whether the sender is a group admin. Replies with a refusal (in the current topic) and returns false otherwise. */
@@ -8,7 +9,7 @@ export async function requireGroupAdmin(ctx: MyContext): Promise<boolean> {
 
   const ok = await isGroupAdmin(ctx.api, ctx.chat.id, ctx.from.id);
   if (!ok) {
-    await ctx.reply("Only group admins can do that.", {
+    await replyEphemeral(ctx, "Only group admins can do that.", {
       message_thread_id: currentThreadId(ctx) || undefined,
     });
   }

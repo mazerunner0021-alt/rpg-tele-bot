@@ -44,6 +44,8 @@ thumbnail, no OOC clutter — while they have an active role.
   (bold name + avatar), rate-limited to protect against Bot API abuse.
 - **Utility commands** — `/roll NdM` dice roller, `/character` card, scene
   templates, and `/export` transcript generation.
+- **On-demand cleanup** — `/cleanup` removes the bot's own prompts,
+  confirmations, and errors from a topic, keeping the RP content readable.
 - All state lives in Postgres via Prisma — nothing important is held only in
   memory, so a Render restart/redeploy never loses in-progress work.
 
@@ -245,6 +247,7 @@ needing a live database connection at generation time.
 | `/character` | in a scene topic | anyone | Show your active character's card in this topic |
 | `/roll NdM` | anywhere | anyone | Roll dice, e.g. `/roll 2d6` (max 20 dice, max 1000 sides) |
 | `/cancel` | anywhere | anyone | Cancel your current in-progress multi-step action |
+| `/cleanup` | any topic | admin | Delete the bot's prompts, confirmations, and errors tracked in this topic |
 | `/help`, `/start` | anywhere | anyone | Show a command summary |
 
 Most of these also have inline-button equivalents (proposing a character,
@@ -350,6 +353,18 @@ their real name for the transcript, and the rate limit is logged as a warning.
 **CommonJS output, not ESM.** `tsconfig.json` targets CommonJS so `node
 dist/index.js` runs directly on Render with no loader flags or `"type":
 "module"` interop concerns with grammY/Prisma/Express.
+
+**Clutter cleanup is on-demand (`/cleanup`), not automatic deletion.** Every
+bot-sent prompt/confirmation/error, and the raw replies that feed a
+forced-reply flow, are tracked in an `EphemeralMessage` table as they're
+sent. `/cleanup` bulk-deletes everything tracked for the current topic. This
+was chosen over auto-deleting messages the instant they're superseded
+because a manual, explicit command is safer to reason about (nothing
+disappears mid-conversation while someone's still reading it) and matches
+what was actually asked for. Deliberately never tracked as ephemeral: the
+pinned control cards, character proposal cards, banners, RP dialogue,
+approval/rejection notices, and `/roll`/`/character` results — anything
+that's a record of something, not just clutter from getting there.
 
 ## Known limitations
 

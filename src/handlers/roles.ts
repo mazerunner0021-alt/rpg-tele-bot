@@ -5,6 +5,7 @@ import { prisma } from "../lib/prisma";
 import { escapeHtml, displayNameOf } from "../lib/format";
 import { safeCall, safeDeleteMessage } from "../lib/telegram";
 import { getSceneForCurrentTopic, currentThreadId } from "../lib/scope";
+import { replyEphemeral } from "../lib/ephemeral";
 import { RateLimiter } from "../lib/rateLimiter";
 import { logger } from "../lib/logger";
 import type { MyContext } from "../bot/context";
@@ -75,7 +76,7 @@ async function sendCharacterSwitchPicker(ctx: MyContext, scene: Scene): Promise<
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery({ text: "You don't have a character in this scene.", show_alert: true });
     } else {
-      await ctx.reply("You don't have a character in this scene.", { message_thread_id: currentThreadId(ctx) });
+      await replyEphemeral(ctx, "You don't have a character in this scene.", { message_thread_id: currentThreadId(ctx) });
     }
     return;
   }
@@ -87,7 +88,10 @@ async function sendCharacterSwitchPicker(ctx: MyContext, scene: Scene): Promise<
   if (ctx.callbackQuery) {
     await ctx.answerCallbackQuery();
   }
-  await ctx.reply("Choose who you're speaking as:", {
+  // Normally self-cleaning (deleted the moment a character is picked, in
+  // role:pick below); tracked as ephemeral too as a safety net in case the
+  // user opens this and never picks one.
+  await replyEphemeral(ctx, "Choose who you're speaking as:", {
     message_thread_id: currentThreadId(ctx),
     reply_markup: kb,
   });

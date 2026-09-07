@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
 import { safeCall, safePinMessage } from "../lib/telegram";
 import { getOrCreateGroup, GENERAL_TOPIC_ID } from "../lib/scope";
+import { replyEphemeral } from "../lib/ephemeral";
 import { requireGroupAdmin, requireGroupChat } from "../bot/guards";
 import type { MyContext } from "../bot/context";
 
@@ -61,20 +62,20 @@ export async function runSetup(ctx: MyContext): Promise<void> {
   ]);
 
   if (existingCasting && existingIntro) {
-    await ctx.reply("Setup already ran for this group — check the 📋 Casting and 🎭 Introductions topics.");
+    await replyEphemeral(ctx, "Setup already ran for this group — check the 📋 Casting and 🎭 Introductions topics.");
     return;
   }
 
   if (!existingCasting) await createCastingTopic(ctx, group.id, chat.id);
   if (!existingIntro) await createIntroTopic(ctx, group.id, chat.id);
 
-  await ctx.reply("Setup complete! Check the new 📋 Casting and 🎭 Introductions topics.");
+  await replyEphemeral(ctx, "Setup complete! Check the new 📋 Casting and 🎭 Introductions topics.");
 }
 
 async function createCastingTopic(ctx: MyContext, groupId: string, chatId: number): Promise<void> {
   const forumTopic = await safeCall("createForumTopic(Casting)", () => ctx.api.createForumTopic(chatId, "📋 Casting"));
   if (!forumTopic) {
-    await ctx.reply("Couldn't create the Casting topic. Make sure I have the Manage Topics admin permission.");
+    await replyEphemeral(ctx, "Couldn't create the Casting topic. Make sure I have the Manage Topics admin permission.");
     return;
   }
 
@@ -99,7 +100,7 @@ async function createIntroTopic(ctx: MyContext, groupId: string, chatId: number)
     ctx.api.createForumTopic(chatId, "🎭 Introductions")
   );
   if (!forumTopic) {
-    await ctx.reply("Couldn't create the Introductions topic. Make sure I have the Manage Topics admin permission.");
+    await replyEphemeral(ctx, "Couldn't create the Introductions topic. Make sure I have the Manage Topics admin permission.");
     return;
   }
 

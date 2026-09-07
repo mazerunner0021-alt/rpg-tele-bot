@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { escapeHtml, mentionHtml, displayNameOf } from "../lib/format";
 import { safeCall } from "../lib/telegram";
 import { getOrCreateGroup, currentThreadId } from "../lib/scope";
+import { replyEphemeral, trackIncoming } from "../lib/ephemeral";
 import { requireGroupAdminCallback } from "../bot/guards";
 import { setFlow, clearFlow } from "../bot/flow";
 import type { Flow } from "../bot/sessionTypes";
@@ -33,7 +34,7 @@ async function finalizeCharacterProposal(
 
   const castingTopic = await prisma.topic.findFirst({ where: { groupId: group.id, type: "CASTING" } });
   if (!castingTopic) {
-    await ctx.reply("This group hasn't run /setup yet, so there's no Casting topic to post to. Ask an admin to run /setup.");
+    await replyEphemeral(ctx, "This group hasn't run /setup yet, so there's no Casting topic to post to. Ask an admin to run /setup.");
     return;
   }
 
@@ -74,7 +75,7 @@ async function finalizeCharacterProposal(
     await prisma.character.update({ where: { id: character.id }, data: { proposalMessageId: sent.message_id } });
   }
 
-  await ctx.reply("Your character has been submitted for approval!");
+  await replyEphemeral(ctx, "Your character has been submitted for approval!");
 }
 
 /** Continues a propose_character_* flow. Returns true if the update was consumed. */
@@ -82,15 +83,16 @@ export async function continueCastingFlow(ctx: MyContext, flow: Flow): Promise<b
   if (flow.kind === "propose_character_name") {
     const name = ctx.message?.text?.trim();
     if (!name) {
-      await ctx.reply("Please send the character's name as text.");
+      await replyEphemeral(ctx, "Please send the character's name as text.");
       return true;
     }
     if (name.length > 100) {
-      await ctx.reply("That name is too long (max 100 characters). Try again.");
+      await replyEphemeral(ctx, "That name is too long (max 100 characters). Try again.");
       return true;
     }
+    await trackIncoming(ctx);
     setFlow(ctx, { kind: "propose_character_description", name });
-    await ctx.reply("Got it. Now send a short description of the character.", {
+    await replyEphemeral(ctx, "Got it. Now send a short description of the character.", {
       reply_markup: { force_reply: true, selective: true },
     });
     return true;
@@ -99,15 +101,16 @@ export async function continueCastingFlow(ctx: MyContext, flow: Flow): Promise<b
   if (flow.kind === "propose_character_description") {
     const description = ctx.message?.text?.trim();
     if (!description) {
-      await ctx.reply("Please send a short text description.");
+      await replyEphemeral(ctx, "Please send a short text description.");
       return true;
     }
     if (description.length > 1000) {
-      await ctx.reply("That description is too long (max 1000 characters). Try again.");
+      await replyEphemeral(ctx, "That description is too long (max 1000 characters). Try again.");
       return true;
     }
+    await trackIncoming(ctx);
     setFlow(ctx, { kind: "propose_character_photo", name: flow.name, description });
-    await ctx.reply("Optional: send a photo to use as the character's avatar, or send /skip to finish without one.", {
+    await replyEphemeral(ctx, "Optional: send a photo to use as the character's avatar, or send /skip to finish without one.", {
       reply_markup: { force_reply: true, selective: true },
     });
     return true;
@@ -116,6 +119,7 @@ export async function continueCastingFlow(ctx: MyContext, flow: Flow): Promise<b
   if (flow.kind === "propose_character_photo") {
     const photos = ctx.message?.photo;
     const avatarFileId = photos && photos.length > 0 ? photos[photos.length - 1]!.file_id : null;
+    await trackIncoming(ctx);
     clearFlow(ctx);
     await finalizeCharacterProposal(ctx, flow.name, flow.description, avatarFileId);
     return true;
@@ -183,7 +187,7 @@ export function registerCastingHandlers(composer: Composer<MyContext>): void {
   composer.callbackQuery("char:propose", async (ctx) => {
     await ctx.answerCallbackQuery();
     setFlow(ctx, { kind: "propose_character_name" });
-    await ctx.reply("What's the character's name?", {
+    await replyEphemeral(ctx, "What's the character's name?", {
       message_thread_id: currentThreadId(ctx),
       reply_markup: { force_reply: true, selective: true },
     });

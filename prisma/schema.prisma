@@ -44,11 +44,12 @@ model Group {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  topics     Topic[]
-  characters Character[]
-  scenes     Scene[]
-  members    GroupMember[]
-  templates  SceneTemplate[]
+  topics            Topic[]
+  characters        Character[]
+  scenes            Scene[]
+  ephemeralMessages EphemeralMessage[]
+  members           GroupMember[]
+  templates         SceneTemplate[]
 }
 
 /// A forum topic (thread) the bot manages within a group.
@@ -207,4 +208,21 @@ model BotSession {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+/// Bot-sent prompts/confirmations/errors and the raw replies that fed them —
+/// clutter, not RP content or a persistent record. Tracked as they're sent so
+/// /cleanup can bulk-delete them on request; never includes pinned control
+/// cards, character proposal cards, banners, or actual scene dialogue. See
+/// README "Design decisions".
+model EphemeralMessage {
+  id              String   @id @default(cuid())
+  groupId         String
+  telegramTopicId Int
+  messageId       Int
+  createdAt       DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, telegramTopicId])
 }

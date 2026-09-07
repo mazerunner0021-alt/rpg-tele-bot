@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { escapeHtml, mentionHtml, slugify } from "../lib/format";
 import { safeCall, safePinMessage } from "../lib/telegram";
 import { getOrCreateGroup, getSceneForCurrentTopic, currentThreadId } from "../lib/scope";
+import { replyEphemeral, trackIncoming } from "../lib/ephemeral";
 import { isGroupAdmin } from "../lib/adminCheck";
 import { requireGroupAdmin, requireGroupAdminCallback } from "../bot/guards";
 import { setFlow, clearFlow } from "../bot/flow";
@@ -80,7 +81,7 @@ async function createScene(ctx: MyContext, group: Group, title: string, descript
 
   const forumTopic = await safeCall("createForumTopic(scene)", () => ctx.api.createForumTopic(chat.id, `🎬 ${title}`));
   if (!forumTopic) {
-    await ctx.reply("Couldn't create the scene's topic. Make sure I'm an admin with the Manage Topics permission.");
+    await replyEphemeral(ctx, "Couldn't create the scene's topic. Make sure I'm an admin with the Manage Topics permission.");
     return;
   }
 
@@ -99,7 +100,7 @@ async function createScene(ctx: MyContext, group: Group, title: string, descript
   });
 
   await refreshSceneCard(ctx, chat.id, topic.telegramTopicId, scene);
-  await ctx.reply(`Scene <b>${escapeHtml(title)}</b> created! Head to its topic to finish setting it up.`, {
+  await replyEphemeral(ctx, `Scene <b>${escapeHtml(title)}</b> created! Head to its topic to finish setting it up.`, {
     parse_mode: "HTML",
   });
 }
@@ -109,7 +110,7 @@ async function promptNewScene(ctx: MyContext, group: Group): Promise<void> {
 
   if (templates.length === 0) {
     setFlow(ctx, { kind: "new_scene_name" });
-    await ctx.reply("Send a name for the new scene. (Tip: /scene <name> also works directly.)", {
+    await replyEphemeral(ctx, "Send a name for the new scene. (Tip: /scene <name> also works directly.)", {
       message_thread_id: currentThreadId(ctx),
       reply_markup: { force_reply: true, selective: true },
     });
@@ -120,7 +121,7 @@ async function promptNewScene(ctx: MyContext, group: Group): Promise<void> {
   for (const t of templates) kb.text(t.name, `tmpl:use:${t.id}`).row();
   kb.text("🆕 Blank scene", "tmpl:blank");
 
-  await ctx.reply("Start from a saved template, or a blank scene?", {
+  await replyEphemeral(ctx, "Start from a saved template, or a blank scene?", {
     message_thread_id: currentThreadId(ctx),
     reply_markup: kb,
   });
@@ -224,7 +225,8 @@ async function exportTranscript(ctx: MyContext, scene: Scene): Promise<void> {
   const messages = await prisma.sceneMessage.findMany({ where: { sceneId: scene.id }, orderBy: { createdAt: "asc" } });
 
   if (messages.length === 0) {
-    await ctx.reply(
+    await replyEphemeral(
+      ctx,
       "No messages logged for this scene yet. (I can only export messages sent while I've been running and watching this topic — the Bot API doesn't let bots read Telegram's older history.)",
       { message_thread_id: currentThreadId(ctx) }
     );
@@ -279,7 +281,8 @@ async function applyCastShorthand(ctx: MyContext, scene: Scene, text: string): P
   if (errors.length) parts.push(`⚠️ Couldn't apply:\n${errors.map((l) => `• ${l}`).join("\n")}`);
   if (parts.length === 0) parts.push("Nothing to apply.");
 
-  await ctx.reply(parts.join("\n\n"), { message_thread_id: currentThreadId(ctx) });
+  await trackIncoming(ctx);
+  await replyEphemeral(ctx, parts.join("\n\n"), { message_thread_id: currentThreadId(ctx) });
 
   if (applied.length > 0) {
     const updatedScene = await prisma.scene.findUnique({ where: { id: scene.id } });
@@ -292,22 +295,24 @@ export async function continueSceneFlow(ctx: MyContext, flow: Flow): Promise<boo
   if (flow.kind === "set_scene_description") {
     const description = ctx.message?.text?.trim();
     if (!description) {
-      await ctx.reply("Please send the description as text.");
+      await replyEphemeral(ctx, "Please send the description as text.");
       return true;
     }
+    await trackIncoming(ctx);
     const scene = await prisma.scene.update({ where: { id: flow.sceneId }, data: { description } });
     clearFlow(ctx);
     await refreshSceneCard(ctx, ctx.chat!.id, currentThreadId(ctx), scene);
-    await ctx.reply("Description updated.");
+    await replyEphemeral(ctx, "Description updated.");
     return true;
   }
 
   if (flow.kind === "set_scene_banner") {
     const photos = ctx.message?.photo;
     if (!photos || photos.length === 0) {
-      await ctx.reply("Please send a photo.");
+      await replyEphemeral(ctx, "Please send a photo.");
       return true;
     }
+    await trackIncoming(ctx);
     const fileId = photos[photos.length - 1]!.file_id;
     const scene = await prisma.scene.update({ where: { id: flow.sceneId }, data: { bannerFileId: fileId } });
     clearFlow(ctx);
@@ -327,9 +332,10 @@ export async function continueSceneFlow(ctx: MyContext, flow: Flow): Promise<boo
   if (flow.kind === "new_scene_name") {
     const name = ctx.message?.text?.trim();
     if (!name) {
-      await ctx.reply("Please send a name as text.");
+      await replyEphemeral(ctx, "Please send a name as text.");
       return true;
     }
+    await trackIncoming(ctx);
     clearFlow(ctx);
     const group = await getOrCreateGroup(ctx.chat!);
     await createScene(ctx, group, name, null);
@@ -359,11 +365,11 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
     if (!(await requireGroupAdmin(ctx))) return;
     const scene = await getSceneForCurrentTopic(ctx);
     if (!scene) {
-      await ctx.reply("This only works inside a scene topic.");
+      await replyEphemeral(ctx, "This only works inside a scene topic.");
       return;
     }
     if (scene.status === "CLOSED") {
-      await ctx.reply("This scene is already closed.");
+      await replyEphemeral(ctx, "This scene is already closed.");
       return;
     }
     await closeScene(ctx, scene);
@@ -373,11 +379,11 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
     if (!(await requireGroupAdmin(ctx))) return;
     const scene = await getSceneForCurrentTopic(ctx);
     if (!scene || scene.status === "CLOSED") {
-      await ctx.reply("This only works inside an open scene topic.");
+      await replyEphemeral(ctx, "This only works inside an open scene topic.");
       return;
     }
     setFlow(ctx, { kind: "set_scene_banner", sceneId: scene.id });
-    await ctx.reply("Send the new scene photo.", {
+    await replyEphemeral(ctx, "Send the new scene photo.", {
       message_thread_id: currentThreadId(ctx),
       reply_markup: { force_reply: true, selective: true },
     });
@@ -387,12 +393,12 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
     if (!(await requireGroupAdmin(ctx))) return;
     const scene = await getSceneForCurrentTopic(ctx);
     if (!scene) {
-      await ctx.reply("Run this inside a scene topic.");
+      await replyEphemeral(ctx, "Run this inside a scene topic.");
       return;
     }
     const name = (ctx.match ?? "").toString().trim();
     if (!name) {
-      await ctx.reply("Usage: /savetemplate <name>");
+      await replyEphemeral(ctx, "Usage: /savetemplate <name>");
       return;
     }
 
@@ -407,7 +413,7 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
       },
       update: { title: scene.title, description: scene.description },
     });
-    await ctx.reply(`Saved this scene as template "${escapeHtml(name)}". Reuse it later with /scene (no arguments).`, {
+    await replyEphemeral(ctx, `Saved this scene as template "${escapeHtml(name)}". Reuse it later with /scene (no arguments).`, {
       parse_mode: "HTML",
       message_thread_id: currentThreadId(ctx),
     });
@@ -417,7 +423,7 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
     if (!(await requireGroupAdmin(ctx))) return;
     const scene = await getSceneForCurrentTopic(ctx);
     if (!scene) {
-      await ctx.reply("Run this inside a scene topic.");
+      await replyEphemeral(ctx, "Run this inside a scene topic.");
       return;
     }
     await exportTranscript(ctx, scene);
@@ -447,7 +453,7 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
     if (!(await requireGroupAdminCallback(ctx))) return;
     await ctx.answerCallbackQuery();
     setFlow(ctx, { kind: "new_scene_name" });
-    await ctx.reply("Send a name for the new scene.", {
+    await replyEphemeral(ctx, "Send a name for the new scene.", {
       message_thread_id: currentThreadId(ctx),
       reply_markup: { force_reply: true, selective: true },
     });
@@ -462,7 +468,7 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
     }
     await ctx.answerCallbackQuery();
     setFlow(ctx, { kind: "set_scene_description", sceneId: scene.id });
-    await ctx.reply("Send the new description for this scene.", {
+    await replyEphemeral(ctx, "Send the new description for this scene.", {
       message_thread_id: currentThreadId(ctx),
       reply_markup: { force_reply: true, selective: true },
     });
@@ -477,7 +483,7 @@ export function registerSceneHandlers(composer: Composer<MyContext>): void {
     }
     await ctx.answerCallbackQuery();
     setFlow(ctx, { kind: "set_scene_banner", sceneId: scene.id });
-    await ctx.reply("Send a photo to use as this scene's banner.", {
+    await replyEphemeral(ctx, "Send a photo to use as this scene's banner.", {
       message_thread_id: currentThreadId(ctx),
       reply_markup: { force_reply: true, selective: true },
     });
