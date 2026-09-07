@@ -15,8 +15,12 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      # NOT generateValue: true — Render's generator can include characters
+      # (+ / =) that Telegram's setWebhook secret_token rejects (it only
+      # allows A-Z a-z 0-9 _ -). Provide a hex value instead, e.g. from:
+      #   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
       - key: WEBHOOK_SECRET
-        generateValue: true
+        sync: false
       - key: PORT
         value: 10000
       # RENDER_EXTERNAL_URL is injected automatically by Render for every web
