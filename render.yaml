@@ -5,7 +5,11 @@ services:
     plan: free
     region: oregon
     branch: main
-    buildCommand: npm install && npm run build && npx prisma generate && npx prisma migrate deploy
+    # `npm install` runs the Prisma client generator itself via a
+    # postinstall script, so it's always fresh before `npm run build` (tsc)
+    # type-checks against it — generating it *after* build (or relying on a
+    # stale cached client) broke a deploy once when a new model was added.
+    buildCommand: npm install && npm run build && npx prisma migrate deploy
     startCommand: npm run start
     healthCheckPath: /health
     envVars:
