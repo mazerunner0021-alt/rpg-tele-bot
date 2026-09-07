@@ -1,0 +1,210 @@
+// Prisma schema for the RPG Telegram bot.
+// See README.md "Design decisions" for the reasoning behind models that go
+// beyond the minimum spec (GroupMember, SceneTemplate, SceneMessage, BotSession).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TopicType {
+  SETUP
+  CASTING
+  INTRO
+  SCENE
+}
+
+enum TopicStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum CharacterStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SceneStatus {
+  CASTING
+  OPEN
+  CLOSED
+}
+
+/// A Telegram group (supergroup) the bot has been set up in.
+model Group {
+  id             String   @id @default(cuid())
+  telegramChatId BigInt   @unique
+  title          String
+  isForumEnabled Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  topics     Topic[]
+  characters Character[]
+  scenes     Scene[]
+  members    GroupMember[]
+  templates  SceneTemplate[]
+}
+
+/// A forum topic (thread) the bot manages within a group.
+model Topic {
+  id              String      @id @default(cuid())
+  telegramTopicId Int
+  groupId         String
+  type            TopicType
+  status          TopicStatus @default(ACTIVE)
+  createdAt       DateTime    @default(now())
+
+  group Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  scene Scene?
+
+  @@unique([groupId, telegramTopicId])
+  @@index([groupId])
+}
+
+/// A roleplay character proposed by a group member, subject to admin approval.
+model Character {
+  id                String          @id @default(cuid())
+  groupId           String
+  name              String
+  description       String
+  avatarFileId      String?
+  status            CharacterStatus @default(PENDING)
+  proposedByUserId  BigInt
+  proposalMessageId Int?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sceneCasts  SceneCast[]
+  activeRoles ActiveRole[]
+
+  @@index([groupId])
+  @@index([groupId, status])
+}
+
+/// A roleplay scene, 1:1 with the forum topic it lives in.
+model Scene {
+  id               String      @id @default(cuid())
+  topicId          String      @unique
+  groupId          String
+  title            String
+  description      String?
+  bannerFileId     String?
+  status           SceneStatus @default(CASTING)
+  createdByUserId  BigInt
+  controlMessageId Int?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  topic    Topic          @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  group    Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  casts    SceneCast[]
+  active   ActiveRole[]
+  messages SceneMessage[]
+
+  @@index([groupId])
+  @@index([groupId, status])
+}
+
+/// "In THIS scene, this character is played by this user." Scene-scoped only —
+/// there is deliberately no global/permanent claim table (see README).
+model SceneCast {
+  id          String   @id @default(cuid())
+  sceneId     String
+  characterId String
+  userId      BigInt
+  createdAt   DateTime @default(now())
+
+  scene     Scene     @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([sceneId, characterId])
+  @@index([sceneId])
+  @@index([characterId])
+  @@index([sceneId, userId])
+}
+
+/// Which character a user is CURRENTLY speaking as, within a specific scene.
+/// Read by the delete-and-repost logic before reformatting a message.
+model ActiveRole {
+  id          String   @id @default(cuid())
+  userId      BigInt
+  sceneId     String
+  characterId String
+  updatedAt   DateTime @updatedAt
+
+  scene     Scene     @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sceneId])
+  @@index([sceneId])
+  @@index([characterId])
+}
+
+/// Roster of users the bot has observed sending a message in a group. The Bot
+/// API has no "list all members" endpoint, so this roster (built from activity)
+/// is what powers the "assign cast" member picker and @username resolution in
+/// the cast shorthand parser. See README "Design decisions".
+model GroupMember {
+  id          String   @id @default(cuid())
+  groupId     String
+  userId      BigInt
+  username    String?
+  displayName String
+  isAdmin     Boolean  @default(false)
+  lastSeenAt  DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([groupId, username])
+}
+
+/// A saved scene title+description an admin can reuse via /scene with no args.
+model SceneTemplate {
+  id              String   @id @default(cuid())
+  groupId         String
+  name            String
+  title           String
+  description     String?
+  createdByUserId BigInt
+  createdAt       DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, name])
+  @@index([groupId])
+}
+
+/// A log of text seen in an OPEN scene topic (both in-character reposts and
+/// OOC passthrough), used by /export to build a transcript. This is the only
+/// "history" the bot has, since bots cannot read arbitrary past group history
+/// via the Bot API. See README "Design decisions".
+model SceneMessage {
+  id          String   @id @default(cuid())
+  sceneId     String
+  userId      BigInt
+  displayName String
+  text        String
+  createdAt   DateTime @default(now())
+
+  scene Scene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
+  @@index([sceneId])
+  @@index([sceneId, createdAt])
+}
+
+/// Backing store for grammY session data (multi-step flows), so in-progress
+/// flows survive a Render restart/redeploy instead of living only in memory.
+model BotSession {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
