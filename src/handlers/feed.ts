@@ -81,8 +81,13 @@ async function publishPost(ctx: MyContext, feedAccountId: string, fileId: string
   const postId = randomUUID();
   const captionHtml = `<b>${escapeHtml(account.name)}</b>${caption ? `\n${escapeHtml(caption)}` : ""}`;
   const env = getEnv();
+  // A `web_app` inline button is rejected by the Bot API (BUTTON_TYPE_INVALID)
+  // on messages sent directly into a group — that button type only works
+  // from a private chat with the bot. A plain `url` button works everywhere
+  // and still opens the page in Telegram's in-app browser; see README
+  // "Design decisions" for the upgrade path to a fully registered Mini App.
   const keyboard = env.RENDER_EXTERNAL_URL
-    ? new InlineKeyboard().webApp("📱 View as Post", `${env.RENDER_EXTERNAL_URL}/app/post/${postId}`)
+    ? new InlineKeyboard().url("📱 View as Post", `${env.RENDER_EXTERNAL_URL}/app/post/${postId}`)
     : undefined;
 
   const sent = await safeCall("repost as post", () =>

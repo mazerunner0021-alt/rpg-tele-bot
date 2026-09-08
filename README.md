@@ -51,10 +51,11 @@ thumbnail, no OOC clutter — while they have an active role.
   have to hunt through the sidebar.
 - **In-group social feed** — `/post` in the 📸 Feed topic reposts a photo
   under a self-service account (first post just asks for a name, no
-  approval needed) with a "📱 View as Post" button that opens a Telegram Mini
-  App: an Instagram-style card (photo, caption, like count, comments) served
-  server-side, no build step. Replying to a post in-chat is a comment; native
-  Telegram reactions on the post are mirrored as likes.
+  approval needed) with a "📱 View as Post" button that opens an
+  Instagram-style card in Telegram's in-app browser (photo, caption, like
+  count, comments), server-rendered with no build step. Replying to a post
+  in-chat is a comment; native Telegram reactions on the post are mirrored
+  as likes.
 - All state lives in Postgres via Prisma — nothing important is held only in
   memory, so a Render restart/redeploy never loses in-progress work.
 
@@ -389,6 +390,23 @@ the sidebar itself. A `/deletescenetopic`-style command that actually
 removes old closed topics from the sidebar (auto-exporting the transcript
 first, with the data staying in Postgres regardless of what happens to the
 Telegram topic) was scoped out for now but would be a natural follow-up.
+
+**The "View as Post" button is a plain `url` button, not a `web_app`
+button.** The Bot API rejects `web_app` inline buttons with
+`BUTTON_TYPE_INVALID` when attached to a message a bot sends directly into a
+group — that button type only works from a private chat with the bot,
+something confirmed the hard way against the live bot (every `/post`
+briefly failed until this was caught and fixed). A plain `url` button
+pointing at the same page works from anywhere and opens Telegram's in-app
+browser, which for a read-only viewer like this looks and behaves almost
+identically — the page still applies Telegram's theme colors via the
+WebApp JS SDK where available, and degrades to a plain page otherwise. The
+one thing a `url` link can't do that a true registered Mini App could is use
+the deeper WebApp JS bridge (haptics, a native MainButton, `sendData` back
+to the chat) — not needed for this viewer today, but the upgrade path is a
+one-time manual step (register the page with @BotFather via `/newapp`, then
+link to it as `t.me/<bot>/<shortname>?startapp=<postId>` instead of the
+plain HTTPS URL) if that's ever wanted.
 
 **The Feed's Mini App never stores a photo either — same proxy pattern as
 everywhere else.** `GET /media/:fileId` calls Telegram's `getFile` fresh on
