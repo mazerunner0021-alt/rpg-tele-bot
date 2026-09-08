@@ -58,6 +58,7 @@ model Group {
   templates         SceneTemplate[]
   posts             Post[]
   feedPersonas      FeedPersona[]
+  feedAccounts      FeedAccount[]
 }
 
 /// A forum topic (thread) the bot manages within a group.
@@ -89,12 +90,9 @@ model Character {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  group        Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  sceneCasts   SceneCast[]
-  activeRoles  ActiveRole[]
-  posts        Post[]
-  postComments PostComment[]
-  feedPersonas FeedPersona[]
+  group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sceneCasts  SceneCast[]
+  activeRoles ActiveRole[]
 
   @@index([groupId])
   @@index([groupId, status])
@@ -238,43 +236,64 @@ model EphemeralMessage {
   @@index([groupId, telegramTopicId])
 }
 
-/// Which character a user currently posts/comments as in the 📸 Feed topic.
-/// Deliberately a separate, group-scoped concept from ActiveRole (which is
-/// per-scene) rather than repurposing it — the Feed isn't a scene, and this
-/// keeps the existing scene role-switching untouched. See README "Design
-/// decisions".
-model FeedPersona {
-  id          String   @id @default(cuid())
-  groupId     String
-  userId      BigInt
-  characterId String
-  updatedAt   DateTime @updatedAt
+/// A self-service "account" a user creates for the 📸 Feed — just a display
+/// name, no admin approval and no scene casting required. Deliberately its
+/// own concept, separate from the curated/admin-approved Character model
+/// used by Casting and Scenes: the Feed is meant to be zero-friction to
+/// onboard into, so it gets its own lightweight identity a user can create
+/// for themselves in seconds. See README "Design decisions".
+model FeedAccount {
+  id        String   @id @default(cuid())
+  groupId   String
+  userId    BigInt
+  name      String
+  createdAt DateTime @default(now())
 
-  group     Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  group    Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  personas FeedPersona[]
+  posts    Post[]
+  comments PostComment[]
 
-  @@unique([groupId, userId])
-  @@index([characterId])
+  @@index([groupId])
+  @@index([groupId, userId])
 }
 
-/// An in-character "post" to the Feed: a photo the bot reposted (deleting the
-/// original) as coming from the character, with a Mini App "view as post"
+/// Which FeedAccount a user currently posts/comments as. Resolved
+/// automatically when they only have one account; /feed or /post prompts a
+/// picker (with a "create new account" option) when they have several or
+/// none yet.
+model FeedPersona {
+  id            String   @id @default(cuid())
+  groupId       String
+  userId        BigInt
+  feedAccountId String
+  updatedAt     DateTime @updatedAt
+
+  group       Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  feedAccount FeedAccount @relation(fields: [feedAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([feedAccountId])
+}
+
+/// A post to the Feed: a photo the bot reposted (deleting the original) as
+/// coming from the poster's FeedAccount, with a Mini App "view as post"
 /// button attached. The photo itself is never stored — only fileId, a
 /// pointer Telegram resolves on demand. See README "Design decisions".
 model Post {
-  id           String   @id @default(cuid())
-  groupId      String
-  messageId    Int
-  characterId  String
-  authorUserId BigInt
-  fileId       String
-  caption      String?
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  groupId       String
+  messageId     Int
+  feedAccountId String
+  authorUserId  BigInt
+  fileId        String
+  caption       String?
+  createdAt     DateTime @default(now())
 
-  group     Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  character Character      @relation(fields: [characterId], references: [id], onDelete: Cascade)
-  comments  PostComment[]
-  reactions PostReaction[]
+  group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  feedAccount FeedAccount    @relation(fields: [feedAccountId], references: [id], onDelete: Cascade)
+  comments    PostComment[]
+  reactions   PostReaction[]
 
   @@unique([groupId, messageId])
   @@index([groupId])
@@ -285,16 +304,16 @@ model Post {
 /// Mirrored into the Mini App's comment thread; the raw chat reply is left
 /// untouched in the topic.
 model PostComment {
-  id          String   @id @default(cuid())
-  postId      String
-  messageId   Int
-  userId      BigInt
-  characterId String
-  text        String
-  createdAt   DateTime @default(now())
+  id            String   @id @default(cuid())
+  postId        String
+  messageId     Int
+  userId        BigInt
+  feedAccountId String
+  text          String
+  createdAt     DateTime @default(now())
 
-  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
-  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  post        Post        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  feedAccount FeedAccount @relation(fields: [feedAccountId], references: [id], onDelete: Cascade)
 
   @@index([postId])
 }

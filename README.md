@@ -49,8 +49,9 @@ thumbnail, no OOC clutter — while they have an active role.
 - **Scene index** — a pinned message in Casting (`/scenes`) listing every
   scene with a button that deep-links straight to its topic, so you don't
   have to hunt through the sidebar.
-- **In-group social feed** — `/post` in the 📸 Feed topic reposts a photo as
-  your character with a "📱 View as Post" button that opens a Telegram Mini
+- **In-group social feed** — `/post` in the 📸 Feed topic reposts a photo
+  under a self-service account (first post just asks for a name, no
+  approval needed) with a "📱 View as Post" button that opens a Telegram Mini
   App: an Instagram-style card (photo, caption, like count, comments) served
   server-side, no build step. Replying to a post in-chat is a comment; native
   Telegram reactions on the post are mirrored as likes.
@@ -254,8 +255,8 @@ needing a live database connection at generation time.
 | `/export` | in a scene topic | admin | Export the logged transcript as a `.txt` file |
 | `/switch` | in an open scene topic | anyone with a role | Re-show the character picker (in case the pinned one scrolled away) |
 | `/character` | in a scene topic | anyone | Show your active character's card in this topic |
-| `/post` | in 📸 Feed only | anyone cast in a scene | Post a photo (+ optional caption) to the Feed as your character |
-| `/persona` | anywhere | anyone cast in a scene | Pick/change which character you post and comment as in the Feed |
+| `/post` | in 📸 Feed only | anyone | Post a photo (+ optional caption) to the Feed; first time asks for an account name |
+| `/feed` | anywhere | anyone | See/switch your Feed accounts, or create a new one |
 | `/roll NdM` | anywhere | anyone | Roll dice, e.g. `/roll 2d6` (max 20 dice, max 1000 sides) |
 | `/cancel` | anywhere | anyone | Cancel your current in-progress multi-step action |
 | `/cleanup` | any topic | admin | Delete the bot's prompts, confirmations, and errors tracked in this topic |
@@ -393,18 +394,23 @@ Telegram topic) was scoped out for now but would be a natural follow-up.
 everywhere else.** `GET /media/:fileId` calls Telegram's `getFile` fresh on
 every request and streams the bytes straight through (`src/lib/media.ts`);
 nothing touches disk or Postgres. The only things persisted are `Post` /
-`PostComment` rows — tiny pointers (`fileId`, text, character, timestamps) —
+`PostComment` rows — tiny pointers (`fileId`, text, account, timestamps) —
 because there's no Bot API query for "get replies to message X" either, so
 comments have to be captured incrementally as replies arrive, exactly like
 the `SceneMessage` transcript log.
 
-**Feed "persona" is a separate table from `ActiveRole`, not a repurposing of
-it.** `ActiveRole` is inherently scene-scoped (`{userId, sceneId}`); the Feed
-topic isn't a scene, so bending that model to fit would have meant touching
-already-working scene code for a loosely related feature. `FeedPersona`
-(`{groupId, userId}` → `characterId`) is a small parallel concept instead:
-"who you post/comment as in this group's Feed," resolved automatically when
-you're only cast as one character, or via `/persona` when you play several.
+**Feed identities (`FeedAccount`) are self-service and deliberately separate
+from the curated `Character` model** used by Casting/Scenes — posting to the
+Feed does not require proposing a character, admin approval, or being cast
+in a scene. First `/post` (or `/feed`) just asks for a name and you're
+posting seconds later; `FeedPersona` (`{groupId, userId}` → `feedAccountId`)
+remembers which account is currently active, auto-resolved when you only
+have one, prompted via a picker (with a "create new account" option) when
+you have several. This was a deliberate pivot from an earlier version that
+required scene casting — it added real friction for a feature meant to be
+the easy, casual one, and had nothing to do with `ActiveRole`'s actual job
+(tracking who's speaking as whom *inside a scene's dialogue*), so bending it
+to fit would have meant coupling two unrelated concerns.
 
 **Likes mirror Telegram's native reactions rather than inventing a button.**
 `message_reaction` updates are opt-in (excluded from the Bot API's default
@@ -438,12 +444,12 @@ like.
   screenshot. Proper `initData` verification (confirming the request really
   came from Telegram, and who as) is the natural next step if that matters
   for a given group.
-- **Feed posting/commenting requires being cast as a character somewhere in
-  the group.** A member who's never been assigned a role in any scene can't
-  use `/post`, `/persona`, or have their replies mirrored as comments — by
-  design ("in-character only"), but worth knowing if a Feed post seems to
-  silently not need a comment mirrored: check the commenter has run
-  `/persona` or is only cast as one character.
+- **A comment only gets mirrored into the Mini App if the commenter has a
+  resolved Feed account.** If someone has never posted or run `/feed`, their
+  reply still shows up fine in the topic itself but silently doesn't appear
+  in the comment thread server-side — there's no repeated nagging on every
+  comment attempt by design (see "Design decisions"), so if a comment seems
+  to be missing from the Mini App, that's almost always why.
 
 ## Testing
 

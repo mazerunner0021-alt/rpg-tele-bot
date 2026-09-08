@@ -7,7 +7,7 @@ import { continueFeedFlow } from "../handlers/feed";
 
 const CASTING_KINDS = new Set(["propose_character_name", "propose_character_description", "propose_character_photo"]);
 const SCENE_KINDS = new Set(["set_scene_description", "set_scene_banner", "new_scene_name", "assign_cast"]);
-const FEED_KINDS = new Set(["await_post_photo"]);
+const FEED_KINDS = new Set(["await_account_name", "await_post_photo"]);
 
 /**
  * Routes the next text/photo message to whichever feature module owns the

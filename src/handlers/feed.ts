@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { InlineKeyboard, type Composer } from "grammy";
-import type { Character } from "@prisma/client";
+import type { FeedAccount } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { getEnv } from "../config/env";
 import { escapeHtml } from "../lib/format";
@@ -12,53 +12,63 @@ import type { Flow } from "../bot/sessionTypes";
 import type { MyContext } from "../bot/context";
 import { logger } from "../lib/logger";
 
-/** Every character a user currently plays anywhere in the group — their available Feed personas. */
-async function getAvailableCharacters(groupId: string, userId: number): Promise<Character[]> {
-  const casts = await prisma.sceneCast.findMany({
-    where: { userId: BigInt(userId), scene: { groupId } },
-    distinct: ["characterId"],
-    include: { character: true },
+const MAX_ACCOUNT_NAME_LENGTH = 60;
+
+async function getAccounts(groupId: string, userId: number): Promise<FeedAccount[]> {
+  return prisma.feedAccount.findMany({
+    where: { groupId, userId: BigInt(userId) },
+    orderBy: { createdAt: "asc" },
   });
-  return casts.map((c) => c.character);
 }
 
-type PersonaResolution =
-  | { kind: "resolved"; character: Character }
+type AccountResolution =
+  | { kind: "resolved"; account: FeedAccount }
   | { kind: "none" }
-  | { kind: "ambiguous"; options: Character[] };
+  | { kind: "ambiguous"; options: FeedAccount[] };
 
-async function resolvePersona(groupId: string, userId: number): Promise<PersonaResolution> {
+/** The user's currently-active Feed account, auto-resolving when they have exactly one. */
+async function resolveActiveAccount(groupId: string, userId: number): Promise<AccountResolution> {
   const existing = await prisma.feedPersona.findUnique({
     where: { groupId_userId: { groupId, userId: BigInt(userId) } },
-    include: { character: true },
+    include: { feedAccount: true },
   });
-  if (existing) return { kind: "resolved", character: existing.character };
+  if (existing) return { kind: "resolved", account: existing.feedAccount };
 
-  const available = await getAvailableCharacters(groupId, userId);
-  if (available.length === 0) return { kind: "none" };
-  if (available.length === 1) {
+  const accounts = await getAccounts(groupId, userId);
+  if (accounts.length === 0) return { kind: "none" };
+  if (accounts.length === 1) {
     await prisma.feedPersona.create({
-      data: { groupId, userId: BigInt(userId), characterId: available[0]!.id },
+      data: { groupId, userId: BigInt(userId), feedAccountId: accounts[0]!.id },
     });
-    return { kind: "resolved", character: available[0]! };
+    return { kind: "resolved", account: accounts[0]! };
   }
-  return { kind: "ambiguous", options: available };
+  return { kind: "ambiguous", options: accounts };
 }
 
-async function sendPersonaPicker(ctx: MyContext, options: Character[]): Promise<void> {
+async function sendAccountPicker(ctx: MyContext, groupId: string, userId: number, accounts: FeedAccount[]): Promise<void> {
+  const persona = await prisma.feedPersona.findUnique({ where: { groupId_userId: { groupId, userId: BigInt(userId) } } });
   const kb = new InlineKeyboard();
-  for (const c of options) kb.text(c.name, `persona:pick:${c.id}`).row();
-  await replyEphemeral(ctx, "Which character do you want to be?", {
+  for (const a of accounts) {
+    const label = a.id === persona?.feedAccountId ? `✅ ${a.name}` : a.name;
+    kb.text(label, `account:pick:${a.id}`).row();
+  }
+  kb.text("➕ New account", "account:new");
+  await replyEphemeral(ctx, "Your Feed accounts:", { message_thread_id: currentThreadId(ctx), reply_markup: kb });
+}
+
+async function promptNewAccountName(ctx: MyContext, purpose: "post" | "manage", intro: string): Promise<void> {
+  setFlow(ctx, { kind: "await_account_name", purpose });
+  await replyEphemeral(ctx, intro, {
     message_thread_id: currentThreadId(ctx),
-    reply_markup: kb,
+    reply_markup: { force_reply: true, selective: true },
   });
 }
 
-async function publishPost(ctx: MyContext, characterId: string, fileId: string, caption: string | null): Promise<void> {
+async function publishPost(ctx: MyContext, feedAccountId: string, fileId: string, caption: string | null): Promise<void> {
   const chat = ctx.chat;
   if (!chat || !ctx.from) return;
-  const character = await prisma.character.findUnique({ where: { id: characterId } });
-  if (!character) return;
+  const account = await prisma.feedAccount.findUnique({ where: { id: feedAccountId } });
+  if (!account) return;
 
   const threadId = currentThreadId(ctx);
   const originalMessageId = ctx.message!.message_id;
@@ -69,7 +79,7 @@ async function publishPost(ctx: MyContext, characterId: string, fileId: string, 
   }
 
   const postId = randomUUID();
-  const captionHtml = `<b>${escapeHtml(character.name)}</b>${caption ? `\n${escapeHtml(caption)}` : ""}`;
+  const captionHtml = `<b>${escapeHtml(account.name)}</b>${caption ? `\n${escapeHtml(caption)}` : ""}`;
   const env = getEnv();
   const keyboard = env.RENDER_EXTERNAL_URL
     ? new InlineKeyboard().webApp("📱 View as Post", `${env.RENDER_EXTERNAL_URL}/app/post/${postId}`)
@@ -91,9 +101,9 @@ async function publishPost(ctx: MyContext, characterId: string, fileId: string, 
   await prisma.post.create({
     data: {
       id: postId,
-      groupId: character.groupId,
+      groupId: account.groupId,
       messageId: sent.message_id,
-      characterId: character.id,
+      feedAccountId: account.id,
       authorUserId: BigInt(ctx.from.id),
       fileId,
       caption,
@@ -101,8 +111,47 @@ async function publishPost(ctx: MyContext, characterId: string, fileId: string, 
   });
 }
 
-/** Continues an await_post_photo flow. Returns true if the update was consumed. */
+/** Continues an await_account_name or await_post_photo flow. Returns true if the update was consumed. */
 export async function continueFeedFlow(ctx: MyContext, flow: Flow): Promise<boolean> {
+  if (flow.kind === "await_account_name") {
+    const name = ctx.message?.text?.trim();
+    if (!name) {
+      await replyEphemeral(ctx, "Please send a name as text.");
+      return true;
+    }
+    if (name.length > MAX_ACCOUNT_NAME_LENGTH) {
+      await replyEphemeral(ctx, `That name's a bit long (max ${MAX_ACCOUNT_NAME_LENGTH} characters). Try again.`);
+      return true;
+    }
+    if (!ctx.chat || !ctx.from) return true;
+
+    await trackIncoming(ctx);
+    const group = await getOrCreateGroup(ctx.chat);
+    const account = await prisma.feedAccount.create({
+      data: { groupId: group.id, userId: BigInt(ctx.from.id), name },
+    });
+    await prisma.feedPersona.upsert({
+      where: { groupId_userId: { groupId: group.id, userId: BigInt(ctx.from.id) } },
+      create: { groupId: group.id, userId: BigInt(ctx.from.id), feedAccountId: account.id },
+      update: { feedAccountId: account.id },
+    });
+
+    if (flow.purpose === "post") {
+      setFlow(ctx, { kind: "await_post_photo", feedAccountId: account.id });
+      await replyEphemeral(
+        ctx,
+        `Account created! Posting as <b>${escapeHtml(account.name)}</b>. Send the photo you want to post (add a caption if you like).`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } }
+      );
+    } else {
+      clearFlow(ctx);
+      await replyEphemeral(ctx, `Account created! You're now posting as <b>${escapeHtml(account.name)}</b>.`, {
+        parse_mode: "HTML",
+      });
+    }
+    return true;
+  }
+
   if (flow.kind !== "await_post_photo") return false;
 
   const photos = ctx.message?.photo;
@@ -113,7 +162,7 @@ export async function continueFeedFlow(ctx: MyContext, flow: Flow): Promise<bool
 
   await trackIncoming(ctx);
   clearFlow(ctx);
-  await publishPost(ctx, flow.characterId, photos[photos.length - 1]!.file_id, ctx.message?.caption ?? null);
+  await publishPost(ctx, flow.feedAccountId, photos[photos.length - 1]!.file_id, ctx.message?.caption ?? null);
   return true;
 }
 
@@ -127,96 +176,85 @@ export function registerFeedCommands(composer: Composer<MyContext>): void {
     }
 
     const group = await getOrCreateGroup(ctx.chat);
-    const resolution = await resolvePersona(group.id, ctx.from.id);
+    const resolution = await resolveActiveAccount(group.id, ctx.from.id);
 
     if (resolution.kind === "none") {
-      await replyEphemeral(
-        ctx,
-        "You need to be cast as a character in a scene before you can post to the Feed. Ask an admin to cast you first.",
-        { message_thread_id: currentThreadId(ctx) }
-      );
+      await promptNewAccountName(ctx, "post", "You don't have a Feed account yet. What name do you want to post as?");
       return;
     }
 
     if (resolution.kind === "ambiguous") {
-      setFlow(ctx, { kind: "await_persona_pick", purpose: "post" });
-      await sendPersonaPicker(ctx, resolution.options);
+      setFlow(ctx, { kind: "await_account_pick", purpose: "post" });
+      await sendAccountPicker(ctx, group.id, ctx.from.id, resolution.options);
       return;
     }
 
-    setFlow(ctx, { kind: "await_post_photo", characterId: resolution.character.id });
+    setFlow(ctx, { kind: "await_post_photo", feedAccountId: resolution.account.id });
     await replyEphemeral(
       ctx,
-      `Posting as <b>${escapeHtml(resolution.character.name)}</b>. Send the photo you want to post (add a caption if you like).`,
+      `Posting as <b>${escapeHtml(resolution.account.name)}</b>. Send the photo you want to post (add a caption if you like).`,
       { parse_mode: "HTML", message_thread_id: currentThreadId(ctx), reply_markup: { force_reply: true, selective: true } }
     );
   });
 
-  composer.command("persona", async (ctx) => {
+  composer.command("feed", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
     const group = await getOrCreateGroup(ctx.chat);
-    const available = await getAvailableCharacters(group.id, ctx.from.id);
+    const accounts = await getAccounts(group.id, ctx.from.id);
 
-    if (available.length === 0) {
-      await replyEphemeral(ctx, "You're not cast as any character yet. Ask an admin to cast you in a scene first.", {
-        message_thread_id: currentThreadId(ctx),
-      });
+    if (accounts.length === 0) {
+      await promptNewAccountName(ctx, "manage", "You don't have a Feed account yet. What name do you want to post as?");
       return;
     }
 
-    if (available.length === 1) {
-      await prisma.feedPersona.upsert({
-        where: { groupId_userId: { groupId: group.id, userId: BigInt(ctx.from.id) } },
-        create: { groupId: group.id, userId: BigInt(ctx.from.id), characterId: available[0]!.id },
-        update: { characterId: available[0]!.id },
-      });
-      await replyEphemeral(ctx, `You post and comment in the Feed as <b>${escapeHtml(available[0]!.name)}</b>.`, {
-        parse_mode: "HTML",
-        message_thread_id: currentThreadId(ctx),
-      });
-      return;
-    }
-
-    setFlow(ctx, { kind: "await_persona_pick", purpose: "persona" });
-    await sendPersonaPicker(ctx, available);
+    setFlow(ctx, { kind: "await_account_pick", purpose: "manage" });
+    await sendAccountPicker(ctx, group.id, ctx.from.id, accounts);
   });
 
-  composer.callbackQuery(/^persona:pick:(.+)$/, async (ctx) => {
+  composer.callbackQuery(/^account:pick:(.+)$/, async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
     const flow = ctx.session.flow;
-    if (!flow || flow.kind !== "await_persona_pick") {
-      await ctx.answerCallbackQuery({ text: "This menu expired.", show_alert: true });
+    if (!flow || flow.kind !== "await_account_pick") {
+      await ctx.answerCallbackQuery({ text: "This menu expired — run /feed again.", show_alert: true });
       return;
     }
 
-    const characterId = ctx.match[1]!;
-    const character = await prisma.character.findUnique({ where: { id: characterId } });
-    if (!character) {
-      await ctx.answerCallbackQuery({ text: "That character no longer exists.", show_alert: true });
+    const accountId = ctx.match[1]!;
+    const account = await prisma.feedAccount.findUnique({ where: { id: accountId } });
+    if (!account || account.userId !== BigInt(ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "That's not your account.", show_alert: true });
       return;
     }
 
     const group = await getOrCreateGroup(ctx.chat);
     await prisma.feedPersona.upsert({
       where: { groupId_userId: { groupId: group.id, userId: BigInt(ctx.from.id) } },
-      create: { groupId: group.id, userId: BigInt(ctx.from.id), characterId },
-      update: { characterId },
+      create: { groupId: group.id, userId: BigInt(ctx.from.id), feedAccountId: accountId },
+      update: { feedAccountId: accountId },
     });
 
-    if (flow.purpose === "persona") {
-      clearFlow(ctx);
-      await ctx.answerCallbackQuery({ text: `You're now ${character.name}.` });
-      await safeCall("delete persona picker", () => ctx.deleteMessage());
+    await safeCall("delete account picker", () => ctx.deleteMessage());
+
+    if (flow.purpose === "post") {
+      await ctx.answerCallbackQuery({ text: `Posting as ${account.name}.` });
+      setFlow(ctx, { kind: "await_post_photo", feedAccountId: accountId });
+      await replyEphemeral(ctx, "Send the photo you want to post (add a caption if you like).", {
+        message_thread_id: currentThreadId(ctx),
+        reply_markup: { force_reply: true, selective: true },
+      });
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: `Posting as ${character.name}.` });
-    await safeCall("delete persona picker", () => ctx.deleteMessage());
-    setFlow(ctx, { kind: "await_post_photo", characterId });
-    await replyEphemeral(ctx, "Send the photo you want to post (add a caption if you like).", {
-      message_thread_id: currentThreadId(ctx),
-      reply_markup: { force_reply: true, selective: true },
-    });
+    clearFlow(ctx);
+    await ctx.answerCallbackQuery({ text: `You're now posting as ${account.name}.` });
+  });
+
+  composer.callbackQuery("account:new", async (ctx) => {
+    const flow = ctx.session.flow;
+    const purpose = flow && flow.kind === "await_account_pick" ? flow.purpose : "manage";
+    await ctx.answerCallbackQuery();
+    await safeCall("delete account picker", () => ctx.deleteMessage());
+    await promptNewAccountName(ctx, purpose, "What name do you want to post as?");
   });
 }
 
@@ -244,7 +282,7 @@ export function registerFeedCommentHandler(composer: Composer<MyContext>): void 
     const persona = await prisma.feedPersona.findUnique({
       where: { groupId_userId: { groupId, userId: BigInt(ctx.from.id) } },
     });
-    if (!persona) return next(); // no resolvable persona — leave the reply un-mirrored, don't nag on every comment
+    if (!persona) return next(); // no resolvable account — leave the reply un-mirrored, don't nag on every comment
 
     await prisma.postComment
       .create({
@@ -252,7 +290,7 @@ export function registerFeedCommentHandler(composer: Composer<MyContext>): void 
           postId: post.id,
           messageId: ctx.message.message_id,
           userId: BigInt(ctx.from.id),
-          characterId: persona.characterId,
+          feedAccountId: persona.feedAccountId,
           text: ctx.message.text,
         },
       })

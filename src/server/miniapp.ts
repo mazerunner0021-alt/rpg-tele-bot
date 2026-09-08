@@ -1,12 +1,12 @@
 import { escapeHtml } from "../lib/format";
 
 export interface PostViewData {
-  characterName: string;
+  accountName: string;
   photoUrl: string;
   caption: string | null;
   likeCount: number;
   createdAt: Date;
-  comments: { characterName: string; text: string; createdAt: Date }[];
+  comments: { accountName: string; text: string; createdAt: Date }[];
 }
 
 function timeAgo(date: Date): string {
@@ -32,7 +32,7 @@ export function renderPostPage(data: PostViewData): string {
         .map(
           (c) => `
         <div class="comment">
-          <span class="comment-author">${escapeHtml(c.characterName)}</span>
+          <span class="comment-author">${escapeHtml(c.accountName)}</span>
           <span class="comment-text">${escapeHtml(c.text)}</span>
           <div class="comment-time">${escapeHtml(timeAgo(c.createdAt))}</div>
         </div>`
@@ -45,7 +45,7 @@ export function renderPostPage(data: PostViewData): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>${escapeHtml(data.characterName)}'s post</title>
+<title>${escapeHtml(data.accountName)}'s post</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root {
@@ -62,13 +62,13 @@ export function renderPostPage(data: PostViewData): string {
     width: 36px; height: 36px; border-radius: 50%; background: var(--link);
     color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;
   }
-  .character-name { font-weight: 600; font-size: 15px; }
+  .account-name { font-weight: 600; font-size: 15px; }
   .photo-wrap { width: 100%; background: var(--card); }
   .photo-wrap img { width: 100%; display: block; }
   .actions { padding: 10px 16px 0; font-size: 14px; color: var(--hint); }
   .likes { font-weight: 600; color: var(--text); }
   .caption { padding: 8px 16px 14px; font-size: 14px; line-height: 1.4; }
-  .caption .character-name { margin-right: 6px; }
+  .caption .account-name { margin-right: 6px; }
   .separator { height: 1px; background: var(--separator); margin: 0 16px; }
   .comments { padding: 8px 16px 24px; }
   .comment { padding: 8px 0; font-size: 14px; line-height: 1.4; border-bottom: 1px solid var(--separator); }
@@ -82,14 +82,14 @@ export function renderPostPage(data: PostViewData): string {
 <body>
   <div class="card">
     <div class="header">
-      <div class="avatar">${escapeHtml(data.characterName.charAt(0).toUpperCase())}</div>
-      <div class="character-name">${escapeHtml(data.characterName)}</div>
+      <div class="avatar">${escapeHtml(data.accountName.charAt(0).toUpperCase())}</div>
+      <div class="account-name">${escapeHtml(data.accountName)}</div>
     </div>
     <div class="photo-wrap"><img src="${data.photoUrl}" alt="" /></div>
     <div class="actions">❤️ <span class="likes">${data.likeCount}</span> ${data.likeCount === 1 ? "like" : "likes"}</div>
     ${
       data.caption
-        ? `<div class="caption"><span class="character-name">${escapeHtml(data.characterName)}</span>${escapeHtml(data.caption)}</div>`
+        ? `<div class="caption"><span class="account-name">${escapeHtml(data.accountName)}</span>${escapeHtml(data.caption)}</div>`
         : ""
     }
     <div class="separator"></div>

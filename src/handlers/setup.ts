@@ -139,8 +139,8 @@ async function createFeedTopic(ctx: MyContext, groupId: string, chatId: number):
   const sent = await safeCall("send Feed welcome", () =>
     ctx.api.sendMessage(
       chatId,
-      "<b>📸 Feed</b>\n\nPost a photo here (with a caption if you like) using /post — it goes out as your character. " +
-        "Reply to a post to comment. Use /persona if you play more than one character and want to switch who you post/comment as.",
+      "<b>📸 Feed</b>\n\nPost a photo here (with a caption if you like) using /post — first time, it'll ask for a name to post under, no approval needed. " +
+        "Reply to a post to comment. Run /feed anytime to see, switch, or add more accounts.",
       { message_thread_id: topic.telegramTopicId, parse_mode: "HTML" }
     )
   );

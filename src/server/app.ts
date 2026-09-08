@@ -70,8 +70,8 @@ export function createApp(bot: Bot<MyContext>): Express {
     const post = await prisma.post.findUnique({
       where: { id: req.params.postId },
       include: {
-        character: true,
-        comments: { orderBy: { createdAt: "asc" }, include: { character: true } },
+        feedAccount: true,
+        comments: { orderBy: { createdAt: "asc" }, include: { feedAccount: true } },
         _count: { select: { reactions: true } },
       },
     });
@@ -83,13 +83,13 @@ export function createApp(bot: Bot<MyContext>): Express {
 
     res.type("html").send(
       renderPostPage({
-        characterName: post.character.name,
+        accountName: post.feedAccount.name,
         photoUrl: `/media/${post.fileId}`,
         caption: post.caption,
         likeCount: post._count.reactions,
         createdAt: post.createdAt,
         comments: post.comments.map((c) => ({
-          characterName: c.character.name,
+          accountName: c.feedAccount.name,
           text: c.text,
           createdAt: c.createdAt,
         })),

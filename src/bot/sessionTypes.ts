@@ -12,8 +12,9 @@ export type Flow =
   | { kind: "set_scene_banner"; sceneId: string }
   | { kind: "new_scene_name" }
   | { kind: "assign_cast"; sceneId: string; characterId?: string; memberPage: number }
-  | { kind: "await_persona_pick"; purpose: "post" | "persona" }
-  | { kind: "await_post_photo"; characterId: string };
+  | { kind: "await_account_pick"; purpose: "post" | "manage" }
+  | { kind: "await_account_name"; purpose: "post" | "manage" }
+  | { kind: "await_post_photo"; feedAccountId: string };
 
 export interface SessionData {
   flow?: Flow;
