@@ -56,20 +56,25 @@ export async function runSetup(ctx: MyContext): Promise<void> {
     update: {},
   });
 
-  const [existingCasting, existingIntro] = await Promise.all([
+  const [existingCasting, existingIntro, existingFeed] = await Promise.all([
     prisma.topic.findFirst({ where: { groupId: group.id, type: TopicType.CASTING } }),
     prisma.topic.findFirst({ where: { groupId: group.id, type: TopicType.INTRO } }),
+    prisma.topic.findFirst({ where: { groupId: group.id, type: TopicType.FEED } }),
   ]);
 
-  if (existingCasting && existingIntro) {
-    await replyEphemeral(ctx, "Setup already ran for this group — check the 📋 Casting and 🎭 Introductions topics.");
+  if (existingCasting && existingIntro && existingFeed) {
+    await replyEphemeral(
+      ctx,
+      "Setup already ran for this group — check the 📋 Casting, 🎭 Introductions, and 📸 Feed topics."
+    );
     return;
   }
 
   if (!existingCasting) await createCastingTopic(ctx, group.id, chat.id);
   if (!existingIntro) await createIntroTopic(ctx, group.id, chat.id);
+  if (!existingFeed) await createFeedTopic(ctx, group.id, chat.id);
 
-  await replyEphemeral(ctx, "Setup complete! Check the new 📋 Casting and 🎭 Introductions topics.");
+  await replyEphemeral(ctx, "Setup complete! Check the new 📋 Casting, 🎭 Introductions, and 📸 Feed topics.");
 }
 
 async function createCastingTopic(ctx: MyContext, groupId: string, chatId: number): Promise<void> {
@@ -115,6 +120,28 @@ async function createIntroTopic(ctx: MyContext, groupId: string, chatId: number)
       chatId,
       "<b>🎭 Introductions</b>\n\nSay hello! Post a short introduction of yourself (the player, not your character) so the group knows who's who.",
       { message_thread_id: topic.telegramTopicId, parse_mode: "HTML", reply_markup: keyboard }
+    )
+  );
+  if (sent) await safePinMessage(ctx.api, chatId, sent.message_id);
+}
+
+async function createFeedTopic(ctx: MyContext, groupId: string, chatId: number): Promise<void> {
+  const forumTopic = await safeCall("createForumTopic(Feed)", () => ctx.api.createForumTopic(chatId, "📸 Feed"));
+  if (!forumTopic) {
+    await replyEphemeral(ctx, "Couldn't create the Feed topic. Make sure I have the Manage Topics admin permission.");
+    return;
+  }
+
+  const topic = await prisma.topic.create({
+    data: { groupId, telegramTopicId: forumTopic.message_thread_id, type: TopicType.FEED },
+  });
+
+  const sent = await safeCall("send Feed welcome", () =>
+    ctx.api.sendMessage(
+      chatId,
+      "<b>📸 Feed</b>\n\nPost a photo here (with a caption if you like) using /post — it goes out as your character. " +
+        "Reply to a post to comment. Use /persona if you play more than one character and want to switch who you post/comment as.",
+      { message_thread_id: topic.telegramTopicId, parse_mode: "HTML" }
     )
   );
   if (sent) await safePinMessage(ctx.api, chatId, sent.message_id);

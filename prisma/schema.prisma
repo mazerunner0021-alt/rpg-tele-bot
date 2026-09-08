@@ -16,6 +16,7 @@ enum TopicType {
   CASTING
   INTRO
   SCENE
+  FEED
 }
 
 enum TopicStatus {
@@ -55,6 +56,8 @@ model Group {
   ephemeralMessages EphemeralMessage[]
   members           GroupMember[]
   templates         SceneTemplate[]
+  posts             Post[]
+  feedPersonas      FeedPersona[]
 }
 
 /// A forum topic (thread) the bot manages within a group.
@@ -86,9 +89,12 @@ model Character {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  sceneCasts  SceneCast[]
-  activeRoles ActiveRole[]
+  group        Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sceneCasts   SceneCast[]
+  activeRoles  ActiveRole[]
+  posts        Post[]
+  postComments PostComment[]
+  feedPersonas FeedPersona[]
 
   @@index([groupId])
   @@index([groupId, status])
@@ -230,4 +236,81 @@ model EphemeralMessage {
   group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@index([groupId, telegramTopicId])
+}
+
+/// Which character a user currently posts/comments as in the 📸 Feed topic.
+/// Deliberately a separate, group-scoped concept from ActiveRole (which is
+/// per-scene) rather than repurposing it — the Feed isn't a scene, and this
+/// keeps the existing scene role-switching untouched. See README "Design
+/// decisions".
+model FeedPersona {
+  id          String   @id @default(cuid())
+  groupId     String
+  userId      BigInt
+  characterId String
+  updatedAt   DateTime @updatedAt
+
+  group     Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([characterId])
+}
+
+/// An in-character "post" to the Feed: a photo the bot reposted (deleting the
+/// original) as coming from the character, with a Mini App "view as post"
+/// button attached. The photo itself is never stored — only fileId, a
+/// pointer Telegram resolves on demand. See README "Design decisions".
+model Post {
+  id           String   @id @default(cuid())
+  groupId      String
+  messageId    Int
+  characterId  String
+  authorUserId BigInt
+  fileId       String
+  caption      String?
+  createdAt    DateTime @default(now())
+
+  group     Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  character Character      @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  comments  PostComment[]
+  reactions PostReaction[]
+
+  @@unique([groupId, messageId])
+  @@index([groupId])
+}
+
+/// A reply to a Post's message, captured as it happens (there is no Bot API
+/// query for "get replies to message X" — see README "Design decisions").
+/// Mirrored into the Mini App's comment thread; the raw chat reply is left
+/// untouched in the topic.
+model PostComment {
+  id          String   @id @default(cuid())
+  postId      String
+  messageId   Int
+  userId      BigInt
+  characterId String
+  text        String
+  createdAt   DateTime @default(now())
+
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+}
+
+/// One row = one user currently has *some* reaction on a Post's message —
+/// mirrors Telegram's native reactions as an Instagram-style "like", without
+/// caring which emoji. Existence, not emoji identity, is what's tracked;
+/// like counts are computed by counting rows, not stored/denormalized.
+model PostReaction {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    BigInt
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([postId])
 }

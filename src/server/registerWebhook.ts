@@ -14,6 +14,12 @@ export async function registerWebhook(bot: Bot<MyContext>): Promise<void> {
   }
 
   const url = `${env.RENDER_EXTERNAL_URL}/webhook/${env.WEBHOOK_SECRET}`;
-  await bot.api.setWebhook(url, { secret_token: env.WEBHOOK_SECRET });
+  await bot.api.setWebhook(url, {
+    secret_token: env.WEBHOOK_SECRET,
+    // Telegram's default (omitted allowed_updates) excludes message_reaction
+    // — needed to mirror reactions as Feed "likes" — so it must be listed
+    // explicitly, alongside everything the bot already relied on by default.
+    allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member", "message_reaction"],
+  });
   logger.info("Webhook registered", { url });
 }

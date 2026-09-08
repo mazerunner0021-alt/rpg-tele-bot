@@ -76,3 +76,17 @@ export async function getSceneForCurrentTopic(ctx: MyContext): Promise<Scene | n
 
   return topic?.scene ?? null;
 }
+
+/** Resolves the Topic row for wherever the current update was sent, regardless of type. */
+export async function getCurrentTopic(ctx: MyContext): Promise<Topic | null> {
+  const chat = ctx.chat;
+  if (!chat) return null;
+  const threadId = currentThreadId(ctx);
+
+  return prisma.topic.findFirst({
+    where: {
+      telegramTopicId: threadId,
+      group: { telegramChatId: BigInt(chat.id) },
+    },
+  });
+}

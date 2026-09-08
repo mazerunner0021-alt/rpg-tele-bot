@@ -16,7 +16,11 @@ async function main(): Promise<void> {
   // A webhook and long polling can't both be active for the same bot token.
   await bot.api.deleteWebhook({ drop_pending_updates: false });
 
-  const runner = run(bot);
+  // message_reaction is opt-in (excluded by Telegram's default), same as for
+  // the webhook — see server/registerWebhook.ts.
+  const runner = run(bot, {
+    runner: { fetch: { allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member", "message_reaction"] } },
+  });
 
   const stop = (): void => {
     if (runner.isRunning()) {

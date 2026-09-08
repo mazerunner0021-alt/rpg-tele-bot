@@ -3,9 +3,11 @@ import type { MyContext } from "./context";
 import { clearFlow, isFlowExpired } from "./flow";
 import { continueCastingFlow } from "../handlers/casting";
 import { continueSceneFlow } from "../handlers/scenes";
+import { continueFeedFlow } from "../handlers/feed";
 
 const CASTING_KINDS = new Set(["propose_character_name", "propose_character_description", "propose_character_photo"]);
 const SCENE_KINDS = new Set(["set_scene_description", "set_scene_banner", "new_scene_name", "assign_cast"]);
+const FEED_KINDS = new Set(["await_post_photo"]);
 
 /**
  * Routes the next text/photo message to whichever feature module owns the
@@ -39,6 +41,12 @@ export function createFlowDispatcher() {
 
     if (SCENE_KINDS.has(flow.kind)) {
       const handled = await continueSceneFlow(ctx, flow);
+      if (handled) return;
+      return next();
+    }
+
+    if (FEED_KINDS.has(flow.kind)) {
+      const handled = await continueFeedFlow(ctx, flow);
       if (handled) return;
       return next();
     }

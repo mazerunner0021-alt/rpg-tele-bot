@@ -49,6 +49,11 @@ thumbnail, no OOC clutter — while they have an active role.
 - **Scene index** — a pinned message in Casting (`/scenes`) listing every
   scene with a button that deep-links straight to its topic, so you don't
   have to hunt through the sidebar.
+- **In-group social feed** — `/post` in the 📸 Feed topic reposts a photo as
+  your character with a "📱 View as Post" button that opens a Telegram Mini
+  App: an Instagram-style card (photo, caption, like count, comments) served
+  server-side, no build step. Replying to a post in-chat is a comment; native
+  Telegram reactions on the post are mirrored as likes.
 - All state lives in Postgres via Prisma — nothing important is held only in
   memory, so a Render restart/redeploy never loses in-progress work.
 
@@ -233,8 +238,8 @@ needing a live database connection at generation time.
    - **Delete messages** (for the in-character repost engine)
    - **Pin messages** (for pinned instructions, banners, and scene control cards)
 5. Run `/setup` in the group (or just wait — adding the bot as an admin
-   triggers setup automatically). The bot creates 📋 Casting and 🎭
-   Introductions topics with pinned instructions.
+   triggers setup automatically). The bot creates 📋 Casting, 🎭
+   Introductions, and 📸 Feed topics with pinned instructions.
 
 ## Command reference
 
@@ -249,6 +254,8 @@ needing a live database connection at generation time.
 | `/export` | in a scene topic | admin | Export the logged transcript as a `.txt` file |
 | `/switch` | in an open scene topic | anyone with a role | Re-show the character picker (in case the pinned one scrolled away) |
 | `/character` | in a scene topic | anyone | Show your active character's card in this topic |
+| `/post` | in 📸 Feed only | anyone cast in a scene | Post a photo (+ optional caption) to the Feed as your character |
+| `/persona` | anywhere | anyone cast in a scene | Pick/change which character you post and comment as in the Feed |
 | `/roll NdM` | anywhere | anyone | Roll dice, e.g. `/roll 2d6` (max 20 dice, max 1000 sides) |
 | `/cancel` | anywhere | anyone | Cancel your current in-progress multi-step action |
 | `/cleanup` | any topic | admin | Delete the bot's prompts, confirmations, and errors tracked in this topic |
@@ -382,6 +389,31 @@ removes old closed topics from the sidebar (auto-exporting the transcript
 first, with the data staying in Postgres regardless of what happens to the
 Telegram topic) was scoped out for now but would be a natural follow-up.
 
+**The Feed's Mini App never stores a photo either — same proxy pattern as
+everywhere else.** `GET /media/:fileId` calls Telegram's `getFile` fresh on
+every request and streams the bytes straight through (`src/lib/media.ts`);
+nothing touches disk or Postgres. The only things persisted are `Post` /
+`PostComment` rows — tiny pointers (`fileId`, text, character, timestamps) —
+because there's no Bot API query for "get replies to message X" either, so
+comments have to be captured incrementally as replies arrive, exactly like
+the `SceneMessage` transcript log.
+
+**Feed "persona" is a separate table from `ActiveRole`, not a repurposing of
+it.** `ActiveRole` is inherently scene-scoped (`{userId, sceneId}`); the Feed
+topic isn't a scene, so bending that model to fit would have meant touching
+already-working scene code for a loosely related feature. `FeedPersona`
+(`{groupId, userId}` → `characterId`) is a small parallel concept instead:
+"who you post/comment as in this group's Feed," resolved automatically when
+you're only cast as one character, or via `/persona` when you play several.
+
+**Likes mirror Telegram's native reactions rather than inventing a button.**
+`message_reaction` updates are opt-in (excluded from the Bot API's default
+`allowed_updates`) — easy to miss, and does need requesting explicitly in
+both `setWebhook` and the long-polling dev entrypoint (`src/dev-poll.ts`).
+`PostReaction` tracks *whether* a user reacted, not which emoji, so switching
+between 👍/❤️/etc. doesn't double-count and removing a reaction removes the
+like.
+
 ## Known limitations
 
 - **No full member list.** Because the Bot API doesn't expose one, the "known
@@ -399,6 +431,19 @@ Telegram topic) was scoped out for now but would be a natural follow-up.
 - **Free-tier Render cold starts.** Without an external keep-warm pinger
   hitting `/health`, the service spins down after inactivity and the first
   webhook delivery after that will be delayed until it wakes up.
+- **The Mini App post page (`GET /app/post/:postId`) isn't access-controlled.**
+  Anyone with the exact link can view it without being a group member or
+  opening it through Telegram — `postId`s aren't guessable (random UUIDs),
+  but the link isn't secret once shared, roughly equivalent to forwarding a
+  screenshot. Proper `initData` verification (confirming the request really
+  came from Telegram, and who as) is the natural next step if that matters
+  for a given group.
+- **Feed posting/commenting requires being cast as a character somewhere in
+  the group.** A member who's never been assigned a role in any scene can't
+  use `/post`, `/persona`, or have their replies mirrored as comments — by
+  design ("in-character only"), but worth knowing if a Feed post seems to
+  silently not need a comment mirrored: check the commenter has run
+  `/persona` or is only cast as one character.
 
 ## Testing
 

@@ -6,6 +6,7 @@ import { registerCastingHandlers } from "./casting";
 import { registerSceneHandlers, registerCastShorthandHandler } from "./scenes";
 import { registerRoleCommands, registerRoleCallbacks, registerRoleRepostHandler } from "./roles";
 import { registerUtilityHandlers } from "./utility";
+import { registerFeedCommands, registerFeedCommentHandler, registerFeedReactionHandler } from "./feed";
 
 /**
  * Wires up every feature module in the one order that matters: commands and
@@ -23,17 +24,23 @@ export function registerAllHandlers(): Composer<MyContext> {
   registerSceneHandlers(composer);
   registerRoleCommands(composer);
   registerUtilityHandlers(composer);
+  registerFeedCommands(composer);
 
   // 1) Continue an in-progress forced-reply flow, if any.
   useFlowDispatcher(composer);
   // 2) Admin free-text cast shorthand ("Name: @user") in a CASTING-status scene topic.
   registerCastShorthandHandler(composer);
-  // 3) Catch-all: delete-and-repost as the sender's active character, or log+passthrough.
+  // 3) Silently mirror Feed-topic replies into PostComment; never consumes.
+  registerFeedCommentHandler(composer);
+  // 4) Catch-all: delete-and-repost as the sender's active character, or log+passthrough.
   registerRoleRepostHandler(composer);
 
   // Callback queries (button presses) — distinct update type, order-independent.
   registerCastingHandlers(composer);
   registerRoleCallbacks(composer);
+
+  // message_reaction — distinct update type, order-independent.
+  registerFeedReactionHandler(composer);
 
   return composer;
 }
